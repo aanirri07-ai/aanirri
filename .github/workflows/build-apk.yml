@@ -1,0 +1,83 @@
+# 초록 하루 — 안드로이드 APK 자동 빌드
+# main 브랜치에 코드가 올라올 때마다 GitHub가 APK를 만들어 Releases에 올려 줘요.
+# 항상 최신 APK: https://github.com/aanirri07-ai/aanirri/releases/latest/download/chorok-haru.apk
+#
+# 서명: Secret `KEYSTORE_PASSWORD` 가 있으면 정식 키(android/app/release.keystore)로 서명해요.
+#       없으면 테스트 서명으로 빌드해요 (설치는 되지만, 나중에 정식 키 버전으로 바꿀 때 한 번 지우고 다시 설치해야 해요).
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Java 설치
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Android SDK 설치
+        uses: android-actions/setup-android@v3
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 웹 코드를 안드로이드 프로젝트로 복사
+        run: npx cap sync android
+
+      - name: APK 빌드
+        id: build
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_PASSWORD" ]; then
+            ./gradlew assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk ../chorok-haru.apk
+            echo "kind=정식 서명" >> "$GITHUB_OUTPUT"
+          else
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk ../chorok-haru.apk
+            echo "kind=테스트 서명 (KEYSTORE_PASSWORD Secret을 아직 설정하지 않음)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Releases에 올리기
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: 초록 하루 v1.0.${{ github.run_number }}
+          body: |
+            안드로이드 폰에서 **chorok-haru.apk** 를 받아 설치하세요.
+            이미 설치되어 있으면 그대로 덮어쓰기 설치돼요 (기록 유지).
+
+            서명: ${{ steps.build.outputs.kind }}
+          files: chorok-haru.apk
+
+      - name: 빌드 결과물 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: chorok-haru-apk
+          path: chorok-haru.apk

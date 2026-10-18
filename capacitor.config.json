@@ -1,0 +1,14 @@
+{
+  "appId": "com.aanirri.chorokharu",
+  "appName": "초록 하루",
+  "webDir": "www",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_check",
+      "iconColor": "#1E8A4B"
+    }
+  }
+}
