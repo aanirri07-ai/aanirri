@@ -57,15 +57,31 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           chmod +x gradlew
+          set -o pipefail
           if [ -n "$KEYSTORE_PASSWORD" ]; then
-            ./gradlew assembleRelease --no-daemon
+            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
             cp app/build/outputs/apk/release/app-release.apk ../chorok-haru.apk
             echo "kind=정식 서명" >> "$GITHUB_OUTPUT"
           else
-            ./gradlew assembleDebug --no-daemon
+            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
             cp app/build/outputs/apk/debug/app-debug.apk ../chorok-haru.apk
             echo "kind=테스트 서명 (KEYSTORE_PASSWORD Secret을 아직 설정하지 않음)" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: 실패하면 로그 요약을 커밋 댓글로 남기기
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### APK 빌드 실패 (run ${{ github.run_number }})"
+            echo '```'
+            grep -n -A3 -E "error:|FAILURE|What went wrong|Exception|Could not|not found" build.log | head -120 || true
+            echo '--- tail ---'
+            tail -n 60 build.log
+            echo '```'
+          } > comment.md
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -F body=@comment.md > /dev/null
 
       - name: Releases에 올리기
         uses: softprops/action-gh-release@v2
