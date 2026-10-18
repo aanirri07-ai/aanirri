@@ -360,6 +360,7 @@ function overallStreak(){
   }
   return n;
 }
+function backupSummary(s){return '습관 '+s.habits.length+'개, 일정 '+s.events.length+'개, 기록 '+Object.keys(s.records||{}).length+'일';}
 function quickSteps(t){if(t>=5000)return[500,1000,2000];if(t>=1000)return[100,500,1000];if(t>=100)return[10,50,100];if(t>=10)return[1,5,10];return[1];}
 function typeLabel(t){return t==='count'?'숫자':t==='log'?'기록':'체크';}
 function daysLabel(days){if(days.length===7)return '매일';if(days.join()==='1,2,3,4,5')return '평일';if(days.join()==='0,6')return '주말';return days.slice().sort().map(function(i){return DOW[i];}).join(' ');}
@@ -437,13 +438,14 @@ function beep(){
 }
 
 /* ---------- native alarms (안드로이드 앱에서만) ---------- */
-var native=null,nativeApp=null,alarmPerm='unknown',exactOk=true,alarmCount=0,appVersion='';
+var native=null,nativeApp=null,nativeClip=null,alarmPerm='unknown',exactOk=true,alarmCount=0,appVersion='';
 function nativeInit(){
   try{
     var C=window.Capacitor;
     if(!C||typeof C.isNativePlatform!=='function'||!C.isNativePlatform()||typeof C.registerPlugin!=='function')return;
     native=C.registerPlugin('LocalNotifications');
     nativeApp=C.registerPlugin('App');
+    nativeClip=C.registerPlugin('Clipboard');
   }catch(e){native=null;return;}
   document.documentElement.classList.add('native');
   Promise.resolve()
@@ -673,7 +675,7 @@ function renderSettings(){
   }
   h+='<section class="card"><h3>백업과 복원</h3><p class="hint" style="margin:0 0 6px">기록은 이 폰 안에만 저장돼요. 폰을 바꾸거나 앱을 지우기 전에 백업해 두세요. 다른 사람에게 내 습관 구성을 그대로 주고 싶을 때도 백업 글을 보내면 돼요.</p>'
   +'<div class="chips small"><button class="chip" data-act="copybackup">백업 복사하기</button></div>'
-  +'<form id="restore-form"><textarea id="restore-text" rows="3" placeholder="복사해 둔 백업을 여기에 붙여넣고 복원을 누르세요"></textarea><div class="actions"><button type="submit" class="btn ghost">복원</button></div></form></section>'
+  +'<form id="restore-form"><textarea id="restore-text" rows="3" placeholder="복사해 둔 백업을 여기에 붙여넣고 복원을 누르세요"></textarea><div class="actions"><span class="hint" id="restore-result" style="margin:0;flex:1">지금 기기: '+backupSummary(state)+'</span><button type="submit" class="btn ghost">복원</button></div></form></section>'
   +'<section class="card"><h3>데이터</h3><div class="chips small"><button class="chip" data-act="reseed">예시 습관 다시 넣기</button><button class="chip danger" data-act="wipe">모두 지우고 처음부터</button></div></section>';
   if(native)h+='<section class="card"><h3>앱 업데이트</h3><p class="hint" style="margin:0 0 8px">현재 버전 '+esc(appVersion||'-')+'. 새 버전 APK를 받아 설치하면 덮어쓰기돼요. 기록은 그대로 남아요.</p><div class="chips small"><a class="chip" href="'+APK_URL+'" target="_blank" rel="noopener">최신 버전 확인</a></div></section>';
   h+='<p class="foot">초록 하루 · 이 앱을 받은 누구나 자기 폰에서 자기 습관으로 바꿔 쓸 수 있어요.</p>';
@@ -835,8 +837,11 @@ function onAction(ev){
     case 'copybackup':{
       var txt=JSON.stringify(state);
       var ta=$('#restore-text');
-      var fallback=function(){if(ta){ta.value=txt;ta.focus();ta.select();}toast('아래 칸의 글을 길게 눌러 복사하세요');};
-      try{navigator.clipboard.writeText(txt).then(function(){toast('백업을 복사했어요. 메모장 등에 붙여넣어 보관하세요');},fallback);}catch(e){fallback();}
+      var okMsg='백업을 복사했어요 ('+backupSummary(state)+'). 메모장 등에 붙여넣어 보관하세요';
+      var fallback=function(){if(ta){ta.value=txt;ta.focus();ta.select();}toast('아래 칸의 글을 전체 선택해서 복사하세요');};
+      var webCopy=function(){try{navigator.clipboard.writeText(txt).then(function(){toast(okMsg);},fallback);}catch(e){fallback();}};
+      if(nativeClip){nativeClip.write({string:txt}).then(function(){toast(okMsg);},webCopy);}
+      else webCopy();
       break;}
     case 'reseed':{
       var s=sample(),names=state.habits.map(function(x){return x.name;}),added=0;
@@ -861,10 +866,15 @@ function onSubmit(ev){
   else if(f.id==='restore-form'){
     var txt=$('#restore-text').value.trim();
     if(!txt){toast('붙여넣은 내용이 없어요');return;}
+    /* 앞뒤에 다른 글이 섞여 있어도 { ... } 부분만 골라내요 */
+    var a=txt.indexOf('{'),z=txt.lastIndexOf('}');
+    if(a>=0&&z>a)txt=txt.slice(a,z+1);
     try{
       var obj=JSON.parse(txt);
       if(!obj||!Array.isArray(obj.habits))throw new Error('bad');
-      state=Object.assign(defaults(),obj);normalize();save(true);render();toast('복원했어요');
+      state=Object.assign(defaults(),obj);normalize();save(true);render();
+      var out=$('#restore-result');if(out)out.textContent='복원 완료: '+backupSummary(state);
+      toast('복원했어요: '+backupSummary(state));
     }catch(e){toast('백업 글이 아닌 것 같아요. 복사한 전체를 붙여넣어 주세요');}
   }
 }
@@ -890,6 +900,8 @@ document.addEventListener('submit',onSubmit);
 document.addEventListener('change',onChange);
 document.addEventListener('input',onInput);
 document.addEventListener('pointerdown',unlockAudio);
+/* 키보드가 올라오면 입력 중인 칸이 보이도록 살짝 스크롤 */
+document.addEventListener('focusin',function(e){var t=e.target;if(t&&t.matches&&t.matches('input:not([type=checkbox]):not([type=radio]),textarea')){setTimeout(function(){try{t.scrollIntoView({block:'center',behavior:'smooth'});}catch(x){}},300);}});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet();});
 render();
 nativeInit();
